@@ -90,9 +90,11 @@ export function AppSidebar() {
 			</SidebarContent>
 			<SidebarFooter>
 				<ThemeToggler />
-				<span className="text-xs text-muted-foreground">
-					&copy; {new Date().getFullYear()} StockFlow. All rights reserved.
-				</span>
+				{open && (
+					<span className="text-xs text-muted-foreground">
+						&copy; {new Date().getFullYear()} StockFlow. All rights reserved.
+					</span>
+				)}
 			</SidebarFooter>
 		</Sidebar>
 	);
