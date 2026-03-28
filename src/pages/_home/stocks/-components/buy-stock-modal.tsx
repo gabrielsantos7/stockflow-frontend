@@ -1,8 +1,9 @@
 import { useForm } from '@tanstack/react-form';
 import { useQueryClient } from '@tanstack/react-query';
+import Decimal from 'decimal.js';
 import { LoaderCircle } from 'lucide-react';
 import type { ReactNode } from 'react';
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import {
@@ -37,6 +38,7 @@ import {
 import { getListAllAccountsQueryKey } from '@/http/requests/users';
 import type { AccountResponseDto, ErrorResponseDto } from '@/http/schemas';
 import { useAuth } from '@/integrations/tanstack-store/stores/auth.store';
+import { formatCurrency } from '@/utils/formatters';
 import {
 	type BuyStockSchema,
 	buyStockSchema,
@@ -64,11 +66,56 @@ export function BuyStockModal({
 	trigger,
 }: BuyStockModalProps) {
 	const [internalOpen, setInternalOpen] = useState(false);
+	const [selectedAccountId, setSelectedAccountId] = useState(
+		defaultAccountId ?? ''
+	);
+	const [selectedStockId, setSelectedStockId] = useState('');
+	const [selectedQuantity, setSelectedQuantity] = useState(
+		formDefaultValues.quantity
+	);
 	const isControlled = controlledOpen !== undefined;
 	const open = isControlled ? controlledOpen : internalOpen;
 	const queryClient = useQueryClient();
 	const { user } = useAuth();
 	const userId = user?.userId;
+
+	const selectedStock = useMemo(() => {
+		const normalizedStockId = selectedStockId.trim().toUpperCase();
+
+		if (!normalizedStockId) {
+			return undefined;
+		}
+
+		const selectedAccount = accounts.find(
+			account => account.accountId === selectedAccountId
+		);
+
+		if (selectedAccount) {
+			return selectedAccount.stocks.find(
+				stock => stock.stockId === normalizedStockId
+			);
+		}
+
+		for (const account of accounts) {
+			const foundStock = account.stocks.find(
+				stock => stock.stockId === normalizedStockId
+			);
+
+			if (foundStock) {
+				return foundStock;
+			}
+		}
+
+		return undefined;
+	}, [accounts, selectedAccountId, selectedStockId]);
+
+	const estimatedTotal = useMemo(() => {
+		if (!selectedStock || selectedQuantity <= 0) {
+			return undefined;
+		}
+
+		return new Decimal(selectedStock.currentPrice).mul(selectedQuantity);
+	}, [selectedQuantity, selectedStock]);
 
 	const { mutate: buyStock, isPending: isBuyingStock } =
 		useBuyStock<ErrorResponseDto>({
@@ -123,12 +170,16 @@ export function BuyStockModal({
 
 		if (!isOpen) {
 			form.reset();
+			setSelectedStockId('');
+			setSelectedQuantity(formDefaultValues.quantity);
+			setSelectedAccountId(defaultAccountId ?? '');
 		}
 	};
 
 	useEffect(() => {
 		if (open && defaultAccountId) {
 			form.setFieldValue('accountId', defaultAccountId);
+			setSelectedAccountId(defaultAccountId);
 		}
 	}, [defaultAccountId, form, open]);
 
@@ -166,7 +217,10 @@ export function BuyStockModal({
 										<FieldLabel htmlFor={field.name}>Account</FieldLabel>
 										<Select
 											value={field.state.value}
-											onValueChange={field.handleChange}
+											onValueChange={value => {
+												setSelectedAccountId(value);
+												field.handleChange(value);
+											}}
 											disabled={isBuyingStock}
 										>
 											<SelectTrigger>
@@ -202,7 +256,11 @@ export function BuyStockModal({
 											id={field.name}
 											value={field.state.value}
 											onBlur={field.handleBlur}
-											onChange={e => field.handleChange(e.target.value)}
+											onChange={e => {
+												const value = e.target.value.toUpperCase();
+												setSelectedStockId(value);
+												field.handleChange(value);
+											}}
 											placeholder="AAPL"
 											disabled={isBuyingStock}
 										/>
@@ -228,7 +286,11 @@ export function BuyStockModal({
 											min={1}
 											value={field.state.value}
 											onBlur={field.handleBlur}
-											onChange={e => field.handleChange(Number(e.target.value))}
+											onChange={e => {
+												const nextQuantity = Number(e.target.value);
+												setSelectedQuantity(nextQuantity);
+												field.handleChange(nextQuantity);
+											}}
 											placeholder="67"
 											disabled={isBuyingStock}
 										/>
@@ -239,6 +301,30 @@ export function BuyStockModal({
 								);
 							}}
 						</form.Field>
+						{selectedStock ? (
+							<div className="rounded-md border border-border bg-muted/30 p-3 text-sm">
+								<p className="text-muted-foreground">
+									Current price ({selectedStock.stockId}):{' '}
+									<span className="font-medium text-foreground">
+										{formatCurrency(new Decimal(selectedStock.currentPrice))}
+									</span>
+								</p>
+								{estimatedTotal && (
+									<p className="text-muted-foreground mt-1">
+										Estimated total:{' '}
+										<span className="font-medium text-foreground">
+											{formatCurrency(estimatedTotal)}
+										</span>
+									</p>
+								)}
+							</div>
+						) : (
+							selectedStockId.trim().length > 0 && (
+								<p className="text-xs text-muted-foreground">
+									Unable to preview this ticker price.
+								</p>
+							)
+						)}
 					</FieldGroup>
 					<DialogFooter className="mt-2">
 						<DialogClose asChild>

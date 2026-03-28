@@ -1,7 +1,8 @@
 import { useForm } from '@tanstack/react-form';
 import { useQueryClient } from '@tanstack/react-query';
+import Decimal from 'decimal.js';
 import { LoaderCircle } from 'lucide-react';
-import { useEffect, useMemo } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import {
@@ -35,6 +36,7 @@ import {
 import { getListAllAccountsQueryKey } from '@/http/requests/users';
 import type { AccountResponseDto } from '@/http/schemas';
 import { useAuth } from '@/integrations/tanstack-store/stores/auth.store';
+import { formatCurrency } from '@/utils/formatters';
 import {
 	type BuyStockSchema,
 	buyStockSchema,
@@ -58,6 +60,26 @@ export function SellStockModal({
 	onOpenChange,
 }: SellStockModalProps) {
 	const availableStocks = useMemo(() => account.stocks ?? [], [account.stocks]);
+	const [selectedStockId, setSelectedStockId] = useState('');
+	const [selectedQuantity, setSelectedQuantity] = useState(
+		formDefaultValues.quantity
+	);
+
+	const selectedStock = useMemo(
+		() =>
+			availableStocks.find(
+				stock => stock.stockId === selectedStockId.trim().toUpperCase()
+			),
+		[availableStocks, selectedStockId]
+	);
+
+	const estimatedTotal = useMemo(() => {
+		if (!selectedStock || selectedQuantity <= 0) {
+			return undefined;
+		}
+
+		return new Decimal(selectedStock.currentPrice).mul(selectedQuantity);
+	}, [selectedQuantity, selectedStock]);
 
 	const queryClient = useQueryClient();
 	const { user } = useAuth();
@@ -126,6 +148,8 @@ export function SellStockModal({
 	useEffect(() => {
 		if (open) {
 			form.setFieldValue('accountId', account.accountId);
+			setSelectedStockId('');
+			setSelectedQuantity(formDefaultValues.quantity);
 		}
 	}, [account.accountId, form, open]);
 
@@ -137,6 +161,8 @@ export function SellStockModal({
 
 				if (!isOpen) {
 					form.reset();
+					setSelectedStockId('');
+					setSelectedQuantity(formDefaultValues.quantity);
 				}
 			}}
 		>
@@ -165,7 +191,10 @@ export function SellStockModal({
 										<FieldLabel htmlFor={field.name}>Stock</FieldLabel>
 										<Select
 											value={field.state.value}
-											onValueChange={field.handleChange}
+											onValueChange={value => {
+												setSelectedStockId(value);
+												field.handleChange(value);
+											}}
 											disabled={isSellingStock}
 										>
 											<SelectTrigger>
@@ -202,7 +231,11 @@ export function SellStockModal({
 											min={1}
 											value={field.state.value}
 											onBlur={field.handleBlur}
-											onChange={e => field.handleChange(Number(e.target.value))}
+											onChange={e => {
+												const nextQuantity = Number(e.target.value);
+												setSelectedQuantity(nextQuantity);
+												field.handleChange(nextQuantity);
+											}}
 											placeholder="100"
 											disabled={isSellingStock}
 										/>
@@ -213,6 +246,24 @@ export function SellStockModal({
 								);
 							}}
 						</form.Field>
+						{selectedStock && (
+							<div className="rounded-md border border-border bg-muted/30 p-3 text-sm">
+								<p className="text-muted-foreground">
+									Current price ({selectedStock.stockId}):{' '}
+									<span className="font-medium text-foreground">
+										{formatCurrency(new Decimal(selectedStock.currentPrice))}
+									</span>
+								</p>
+								{estimatedTotal && (
+									<p className="text-muted-foreground mt-1">
+										Estimated total:{' '}
+										<span className="font-medium text-foreground">
+											{formatCurrency(estimatedTotal)}
+										</span>
+									</p>
+								)}
+							</div>
+						)}
 					</FieldGroup>
 					<DialogFooter className="mt-2">
 						<DialogClose asChild>
