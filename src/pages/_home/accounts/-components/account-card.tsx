@@ -1,30 +1,57 @@
+import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { Decimal } from 'decimal.js';
 import {
 	DollarSign,
 	Eye,
+	LoaderCircle,
 	MoreVertical,
 	ShoppingCart,
+	Trash2,
 	Wallet,
 } from 'lucide-react';
 import { useMemo, useState } from 'react';
+import { toast } from 'sonner';
 import CountUp from '@/components/CountUp';
 import { StockLogo } from '@/components/shared/stock-logo';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import {
+	Dialog,
+	DialogClose,
+	DialogContent,
+	DialogDescription,
+	DialogFooter,
+	DialogHeader,
+	DialogTitle,
+} from '@/components/ui/dialog';
+import {
 	DropdownMenu,
 	DropdownMenuContent,
 	DropdownMenuItem,
 	DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import type { AccountResponseDto } from '@/http/schemas';
+import { getListAllAccountsQueryKey } from '@/http/requests/users';
+import type { AccountResponseDto, ErrorResponseDto } from '@/http/schemas';
+import { useAuth } from '@/integrations/tanstack-store/stores/auth.store';
+import { orvalClient } from '@/lib/orval/orval.client';
 import { formatCurrency } from '@/utils/formatters';
 import { BuyStockModal } from '../../stocks/-components/buy-stock-modal';
 import { AccountDetailsModal } from './account-details-modal';
 import { SellStockModal } from './sell-stock-modal';
 
+const deleteAccountById = (accountId: string) => {
+	return orvalClient<void>({
+		url: `/accounts/${accountId}`,
+		method: 'DELETE',
+	});
+};
+
 export function AccountCard({ account }: { account: AccountResponseDto }) {
+	const { user } = useAuth();
+	const userId = user?.userId;
+	const queryClient = useQueryClient();
+
 	const totalValue = useMemo(
 		() =>
 			account.stocks?.reduce((sum, stock) => {
@@ -37,6 +64,37 @@ export function AccountCard({ account }: { account: AccountResponseDto }) {
 	const [isBuyOpen, setIsBuyOpen] = useState(false);
 	const hasStocks = (account.stocks?.length ?? 0) > 0;
 	const [isSellOpen, setIsSellOpen] = useState(false);
+	const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
+
+	const { mutate: deleteAccount, isPending: isDeletingAccount } = useMutation<
+		void,
+		ErrorResponseDto,
+		string
+	>({
+		mutationFn: deleteAccountById,
+		onSuccess: () => {
+			toast.success('Account deleted successfully');
+			setIsDeleteDialogOpen(false);
+			if (userId) {
+				queryClient.invalidateQueries({
+					queryKey: getListAllAccountsQueryKey(userId),
+				});
+			}
+		},
+		onError: error => {
+			const description =
+				error.message || 'An unexpected error occurred while deleting account';
+			toast.error('Error deleting account', { description });
+		},
+	});
+
+	const handleDeleteAccount = () => {
+		if (hasStocks) {
+			return;
+		}
+
+		deleteAccount(account.accountId);
+	};
 
 	return (
 		<Card
@@ -96,21 +154,53 @@ export function AccountCard({ account }: { account: AccountResponseDto }) {
 							<Eye className="mr-2 size-4" />
 							View Details
 						</DropdownMenuItem>
-						{/* <DropdownMenuItem className="cursor-pointer">
-							<Pencil className="mr-2 size-4" />
-							Edit
-						</DropdownMenuItem>
 						<DropdownMenuItem
 							onClick={() => {
-								handleDeleteAccount(account.accountId)
+								setIsDeleteDialogOpen(true);
 							}}
+							disabled={hasStocks || isDeletingAccount}
 							className="text-destructive focus:text-destructive cursor-pointer"
 						>
-							<Trash2 className="mr-2 size-4" />
+							{isDeletingAccount ? (
+								<LoaderCircle className="mr-2 size-4 animate-spin" />
+							) : (
+								<Trash2 className="mr-2 size-4" />
+							)}
 							Delete
-						</DropdownMenuItem> */}
+						</DropdownMenuItem>
 					</DropdownMenuContent>
 				</DropdownMenu>
+				<Dialog open={isDeleteDialogOpen} onOpenChange={setIsDeleteDialogOpen}>
+					<DialogContent className="sm:max-w-md" showCloseButton={false}>
+						<DialogHeader>
+							<DialogTitle>Delete account?</DialogTitle>
+							<DialogDescription>
+								This action cannot be undone. This account will be permanently
+								removed.
+							</DialogDescription>
+						</DialogHeader>
+						<DialogFooter>
+							<DialogClose asChild>
+								<Button variant="outline" disabled={isDeletingAccount}>
+									Cancel
+								</Button>
+							</DialogClose>
+							<Button
+								type="button"
+								variant="destructive"
+								onClick={handleDeleteAccount}
+								disabled={isDeletingAccount || hasStocks}
+								className="md:w-48"
+							>
+								{isDeletingAccount ? (
+									<LoaderCircle className="animate-spin size-5" />
+								) : (
+									'Delete permanently'
+								)}
+							</Button>
+						</DialogFooter>
+					</DialogContent>
+				</Dialog>
 				<AccountDetailsModal
 					account={account}
 					open={isDetailsOpen}
